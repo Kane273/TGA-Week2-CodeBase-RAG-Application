@@ -18,8 +18,8 @@ dependencies = [
     "langchain-ollama>=0.3.10,<0.4",
     "langgraph>=0.5,<0.7",
     "pydantic-settings==2.7.1",
-    "python-multipart==0.0.20",
-    "pypdf>=5.1,<6",
+    "python-multipart==0.0.31",
+    "pypdf>=5.1,<7",
     "python-docx>=1.1,<2",
     "rank-bm25==0.2.2",
     "sentence-transformers>=5.2,<6",
@@ -31,12 +31,12 @@ dependencies = [
     "uvicorn[standard]==0.34.0",
     "pinecone>=6,<8",
     "langsmith>=0.3.45,<1",
-    "langgraph-checkpoint-postgres>=2,<3",
+    "langgraph-checkpoint-postgres>=2,<4",
     "prometheus-client>=0.21,<1",
 ]
 
 [dependency-groups]
-dev = ["pytest==8.3.4"]
+dev = ["pytest==9.0.3"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
