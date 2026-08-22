@@ -21,9 +21,14 @@ jobs:
           ignore-unfixed: true
       - run: docker build --pull -t codebase-rag:${{ github.sha }} .
       - uses: aquasecurity/trivy-action@v0.36.0
+        env:
+          TRIVY_DEBUG: "true"
         with:
           version: "v0.73.0"
           image-ref: "codebase-rag:${{ github.sha }}"
+          scan-type: image
+          scanners: vuln
           severity: "CRITICAL"
           exit-code: "1"
           ignore-unfixed: true
+          timeout: 15m
