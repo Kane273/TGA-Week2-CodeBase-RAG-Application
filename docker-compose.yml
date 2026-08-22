@@ -21,7 +21,7 @@ services:
       timeout: 3s
       retries: 10
   chroma:
-    image: chromadb/chroma:0.5.23
+    image: chromadb/chroma:1.5.9
     volumes: ["chroma_data:/chroma/chroma"]
     environment:
       ANONYMIZED_TELEMETRY: "false"
