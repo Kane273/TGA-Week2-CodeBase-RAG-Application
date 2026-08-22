@@ -13,14 +13,16 @@ jobs:
       - run: uvx pip-audit
       - uses: aquasecurity/trivy-action@v0.36.0
         with:
+          version: "v0.73.0"
           scan-type: fs
           scan-ref: .
           severity: "HIGH,CRITICAL"
           exit-code: "1"
           ignore-unfixed: true
-      - run: docker build -t codebase-rag:${{ github.sha }} .
+      - run: docker build --pull -t codebase-rag:${{ github.sha }} .
       - uses: aquasecurity/trivy-action@v0.36.0
         with:
+          version: "v0.73.0"
           image-ref: "codebase-rag:${{ github.sha }}"
           severity: "CRITICAL"
           exit-code: "1"
