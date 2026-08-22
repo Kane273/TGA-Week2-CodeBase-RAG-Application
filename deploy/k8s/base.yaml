@@ -1,0 +1,238 @@
+apiVersion: v1
+kind: Namespace
+metadata: {name: codebase-rag}
+---
+apiVersion: v1
+kind: Secret
+metadata: {name: rag-secrets, namespace: codebase-rag}
+type: Opaque
+stringData:
+  database-url: postgresql+psycopg://rag:REPLACE_ME@postgres:5432/codebase_rag
+  checkpoint-url: postgresql://rag:REPLACE_ME@postgres:5432/codebase_rag
+  postgres-password: REPLACE_ME
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: rag-config, namespace: codebase-rag}
+data:
+  OLLAMA_BASE_URL: http://ollama:11434
+  REDIS_URL: redis://redis:6379/0
+  CHROMA_HOST: chroma
+  CHROMA_PORT: "8000"
+  INDEXING_WORKER_MODE: redis
+  GRAPH_CHECKPOINT_BACKEND: postgres
+  MALWARE_SCAN_ENABLED: "true"
+  CLAMAV_HOST: clamav
+  # Replace this issuer with the production OIDC realm before deployment.
+  AUTH_ENABLED: "true"
+  OIDC_ISSUER: https://identity.example.com/realms/codebase-rag
+  OIDC_AUDIENCE: codebase-rag
+  LANGSMITH_TRACING: "false"
+  OTEL_ENABLED: "false"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: app, namespace: codebase-rag}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: rag-api}}
+  template:
+    metadata: {labels: {app: rag-api}}
+    spec:
+      securityContext: {runAsNonRoot: true, runAsUser: 1000, fsGroup: 1000}
+      containers:
+        - name: app
+          image: codebase-rag:local
+          ports: [{containerPort: 8000}]
+          envFrom: [{configMapRef: {name: rag-config}}]
+          env:
+            - {name: DATABASE_URL, valueFrom: {secretKeyRef: {name: rag-secrets, key: database-url}}}
+            - {name: GRAPH_CHECKPOINT_DATABASE_URL, valueFrom: {secretKeyRef: {name: rag-secrets, key: checkpoint-url}}}
+          readinessProbe: {httpGet: {path: /api/health/ready, port: 8000}, initialDelaySeconds: 20, periodSeconds: 10}
+          livenessProbe: {httpGet: {path: /api/health/live, port: 8000}, initialDelaySeconds: 30, periodSeconds: 20}
+          resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {cpu: "2", memory: 4Gi}}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          volumeMounts: [{name: tmp, mountPath: /tmp}, {name: rag-data, mountPath: /app/.rag_data}]
+      volumes: [{name: tmp, emptyDir: {}}, {name: rag-data, persistentVolumeClaim: {claimName: rag-shared}}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: worker, namespace: codebase-rag}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: rag-worker}}
+  template:
+    metadata: {labels: {app: rag-worker}}
+    spec:
+      containers:
+        - name: worker
+          image: codebase-rag:local
+          command: ["uv", "run", "--frozen", "python", "scripts/worker.py"]
+          envFrom: [{configMapRef: {name: rag-config}}]
+          env: [{name: DATABASE_URL, valueFrom: {secretKeyRef: {name: rag-secrets, key: database-url}}}]
+          resources: {requests: {cpu: 500m, memory: 1Gi}, limits: {cpu: "4", memory: 8Gi}}
+          volumeMounts: [{name: rag-data, mountPath: /app/.rag_data}]
+      volumes: [{name: rag-data, persistentVolumeClaim: {claimName: rag-shared}}]
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: rag-shared, namespace: codebase-rag}
+spec: {accessModes: [ReadWriteMany], resources: {requests: {storage: 50Gi}}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: app, namespace: codebase-rag}
+spec: {selector: {app: rag-api}, ports: [{port: 8000, targetPort: 8000}]}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: {name: postgres, namespace: codebase-rag}
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector: {matchLabels: {app: postgres}}
+  template:
+    metadata: {labels: {app: postgres}}
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:17-alpine
+          env:
+            - {name: POSTGRES_DB, value: codebase_rag}
+            - {name: POSTGRES_USER, value: rag}
+            - {name: POSTGRES_PASSWORD, valueFrom: {secretKeyRef: {name: rag-secrets, key: postgres-password}}}
+          ports: [{containerPort: 5432}]
+          volumeMounts: [{name: data, mountPath: /var/lib/postgresql/data}]
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec: {accessModes: [ReadWriteOnce], resources: {requests: {storage: 20Gi}}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: postgres, namespace: codebase-rag}
+spec: {selector: {app: postgres}, ports: [{port: 5432}]}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: redis, namespace: codebase-rag}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: redis}}
+  template:
+    metadata: {labels: {app: redis}}
+    spec: {containers: [{name: redis, image: "redis:7-alpine", args: ["redis-server", "--appendonly", "yes"], ports: [{containerPort: 6379}]}]}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: redis, namespace: codebase-rag}
+spec: {selector: {app: redis}, ports: [{port: 6379}]}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: chroma, namespace: codebase-rag}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: chroma}}
+  template:
+    metadata: {labels: {app: chroma}}
+    spec:
+      containers:
+        - name: chroma
+          image: "chromadb/chroma:0.5.23"
+          ports: [{containerPort: 8000}]
+          volumeMounts: [{name: data, mountPath: /chroma/chroma}]
+      volumes: [{name: data, persistentVolumeClaim: {claimName: chroma-data}}]
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: chroma-data, namespace: codebase-rag}
+spec: {accessModes: [ReadWriteOnce], resources: {requests: {storage: 50Gi}}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: chroma, namespace: codebase-rag}
+spec: {selector: {app: chroma}, ports: [{port: 8000}]}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: clamav, namespace: codebase-rag}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: clamav}}
+  template:
+    metadata: {labels: {app: clamav}}
+    spec: {containers: [{name: clamav, image: "clamav/clamav:stable", ports: [{containerPort: 3310}], resources: {requests: {memory: 2Gi}, limits: {memory: 4Gi}}}]}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: clamav, namespace: codebase-rag}
+spec: {selector: {app: clamav}, ports: [{port: 3310}]}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: {name: ollama, namespace: codebase-rag}
+spec:
+  serviceName: ollama
+  replicas: 1
+  selector: {matchLabels: {app: ollama}}
+  template:
+    metadata: {labels: {app: ollama}}
+    spec:
+      containers:
+        - name: ollama
+          image: ollama/ollama:latest
+          ports: [{containerPort: 11434}]
+          volumeMounts: [{name: data, mountPath: /root/.ollama}]
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec: {accessModes: [ReadWriteOnce], resources: {requests: {storage: 30Gi}}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: ollama, namespace: codebase-rag}
+spec: {selector: {app: ollama}, ports: [{port: 11434}]}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: rag
+  namespace: codebase-rag
+  annotations: {nginx.ingress.kubernetes.io/limit-rps: "10", nginx.ingress.kubernetes.io/proxy-body-size: 25m}
+spec:
+  ingressClassName: nginx
+  tls: [{hosts: [rag.local], secretName: rag-tls}]
+  rules: [{host: rag.local, http: {paths: [{path: /, pathType: Prefix, backend: {service: {name: app, port: {number: 8000}}}}]}}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: default-deny, namespace: codebase-rag}
+spec: {podSelector: {}, policyTypes: [Ingress, Egress]}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: allow-required-traffic, namespace: codebase-rag}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from: [{podSelector: {}}]
+    - from: [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: ingress-nginx}}}]
+  egress:
+    - to: [{podSelector: {}}]
+    - to: [{namespaceSelector: {}}]
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    - ports: [{protocol: TCP, port: 443}]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: {name: rag-api, namespace: codebase-rag}
+spec: {minAvailable: 1, selector: {matchLabels: {app: rag-api}}}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: {name: rag-api, namespace: codebase-rag}
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: app}
+  minReplicas: 2
+  maxReplicas: 6
+  metrics: [{type: Resource, resource: {name: cpu, target: {type: Utilization, averageUtilization: 70}}}]

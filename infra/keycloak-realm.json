@@ -1,0 +1,26 @@
+{
+  "realm": "codebase-rag",
+  "enabled": true,
+  "roles": {"realm": [{"name": "admin"}, {"name": "developer"}, {"name": "reviewer"}]},
+  "clients": [{
+    "clientId": "codebase-rag",
+    "enabled": true,
+    "publicClient": true,
+    "standardFlowEnabled": true,
+    "directAccessGrantsEnabled": true,
+    "redirectUris": ["http://localhost:8000/*"],
+    "webOrigins": ["http://localhost:8000"],
+    "protocolMappers": [{
+      "name": "audience",
+      "protocol": "openid-connect",
+      "protocolMapper": "oidc-audience-mapper",
+      "config": {"included.client.audience": "codebase-rag", "access.token.claim": "true"}
+    }]
+  }],
+  "users": [{
+    "username": "demo-admin",
+    "enabled": true,
+    "credentials": [{"type": "password", "value": "demo-admin", "temporary": true}],
+    "realmRoles": ["admin", "developer"]
+  }]
+}

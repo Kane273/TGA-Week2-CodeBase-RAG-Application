@@ -1,0 +1,18 @@
+[
+  {
+    "question": "Where is the LangGraph workflow assembled?",
+    "expected_paths": ["app/graph.py"]
+  },
+  {
+    "question": "How are repository source files divided into AST-aware chunks?",
+    "expected_paths": ["app/ingestion.py"]
+  },
+  {
+    "question": "Where is repository access authorization enforced?",
+    "expected_paths": ["app/security.py", "app/main.py"]
+  },
+  {
+    "question": "How is a new index version activated?",
+    "expected_paths": ["app/jobs.py"]
+  }
+]

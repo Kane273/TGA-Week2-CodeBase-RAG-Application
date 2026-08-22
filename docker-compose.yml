@@ -1,0 +1,125 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: codebase_rag
+      POSTGRES_USER: rag
+      POSTGRES_PASSWORD: local-development-only
+    volumes: ["postgres_data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rag -d codebase_rag"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes: ["redis_data:/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  chroma:
+    image: chromadb/chroma:0.5.23
+    volumes: ["chroma_data:/chroma/chroma"]
+    environment:
+      ANONYMIZED_TELEMETRY: "false"
+  clamav:
+    image: clamav/clamav:stable
+    volumes: ["clamav_data:/var/lib/clamav"]
+    healthcheck:
+      test: ["CMD", "clamdscan", "--ping", "1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.3
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin-local-only
+      KC_HEALTH_ENABLED: "true"
+    ports: ["8080:8080"]
+    volumes: ["./infra/keycloak-realm.json:/opt/keycloak/data/import/codebase-rag-realm.json:ro"]
+  ollama:
+    image: ollama/ollama:latest
+    ports: ["11434:11434"]
+    volumes: ["ollama_data:/root/.ollama"]
+  pinecone-local:
+    profiles: ["pinecone"]
+    image: ghcr.io/pinecone-io/pinecone-index:latest
+    environment:
+      PORT: "5081"
+      INDEX_TYPE: serverless
+      VECTOR_TYPE: dense
+      DIMENSION: "768"
+      METRIC: cosine
+    ports: ["5081:5081"]
+    platform: linux/amd64
+  jaeger:
+    image: jaegertracing/all-in-one:1.62
+    ports: ["16686:16686"]
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.117.0
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes: ["./infra/otel-collector.yaml:/etc/otelcol/config.yaml:ro"]
+    depends_on: [jaeger]
+  app:
+    build: .
+    ports: ["8000:8000"]
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+      DATABASE_URL: postgresql+psycopg://rag:local-development-only@postgres:5432/codebase_rag
+      REDIS_URL: redis://redis:6379/0
+      INDEXING_WORKER_MODE: redis
+      GRAPH_CHECKPOINT_BACKEND: postgres
+      GRAPH_CHECKPOINT_DATABASE_URL: postgresql://rag:local-development-only@postgres:5432/codebase_rag
+      MALWARE_SCAN_ENABLED: "true"
+      CLAMAV_HOST: clamav
+      CHROMA_HOST: chroma
+      CHROMA_PORT: "8000"
+      AUTH_ENABLED: "true"
+      OIDC_ISSUER: http://localhost:8080/realms/codebase-rag
+      OIDC_JWKS_URL: http://keycloak:8080/realms/codebase-rag/protocol/openid-connect/certs
+      OIDC_AUDIENCE: codebase-rag
+      OTEL_ENABLED: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      PINECONE_CONTROL_HOST: http://pinecone-local:5081
+      PINECONE_INDEX_HOST: http://pinecone-local:5081
+    volumes:
+      - ./:/workspace:ro
+      - rag_data:/app/.rag_data
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      chroma: {condition: service_started}
+      keycloak: {condition: service_started}
+      ollama: {condition: service_started}
+      clamav: {condition: service_healthy}
+      otel-collector: {condition: service_started}
+  worker:
+    build: .
+    command: ["uv", "run", "--frozen", "python", "scripts/worker.py"]
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+      DATABASE_URL: postgresql+psycopg://rag:local-development-only@postgres:5432/codebase_rag
+      REDIS_URL: redis://redis:6379/0
+      INDEXING_WORKER_MODE: redis
+      CHROMA_HOST: chroma
+      CHROMA_PORT: "8000"
+    volumes:
+      - ./:/workspace:ro
+      - rag_data:/app/.rag_data
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      chroma: {condition: service_started}
+      ollama: {condition: service_started}
+volumes:
+  postgres_data:
+  redis_data:
+  ollama_data:
+  rag_data:
+  clamav_data:
+  chroma_data:

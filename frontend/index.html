@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#090b10">
+  <title>SourceLens · Codebase Intelligence</title>
+  <link rel="stylesheet" href="/static/styles.css?v=20260822-8">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M8.5 8 4.5 12l4 4M15.5 8l4 4-4 4M13.5 5l-3 14"/></svg>
+      </div>
+      <div><strong>SourceLens</strong><small>Codebase intelligence</small></div>
+    </div>
+
+    <div class="sidebar-scroll">
+      <section class="panel-section compact-section">
+        <div class="section-heading"><span>Conversations</span><button id="newChatButton" class="icon-text-button" type="button">+ New</button></div>
+        <input id="conversationSearch" class="compact-input" type="search" placeholder="Search conversations" aria-label="Search conversations">
+        <div class="select-row">
+          <select id="conversationSelect" aria-label="Conversation history"></select>
+          <button id="deleteChatButton" class="icon-button" type="button" aria-label="Delete conversation">×</button>
+        </div>
+        <div class="conversation-actions"><button id="favoriteChatButton" type="button" aria-label="Favorite conversation">☆</button><button id="renameChatButton" type="button">Rename</button><button id="folderChatButton" type="button">Move</button><button id="tagChatButton" type="button">Tag</button><button id="exportChatButton" type="button">Export</button></div>
+        <div id="activeChatTags" class="chat-tags" aria-label="Conversation tags"></div>
+      </section>
+      <section class="panel-section">
+        <div class="section-heading"><span>Knowledge source</span><span class="step">01</span></div>
+        <label for="workspaceSelect">Active workspace</label>
+        <div class="select-row">
+          <select id="workspaceSelect" aria-label="Active knowledge workspace"><option value="">No indexed workspace</option></select>
+          <button id="removeWorkspaceButton" class="icon-button" type="button" aria-label="Remove temporary workspace">×</button>
+        </div>
+        <div id="workspaceMeta" class="workspace-meta">Select or index a knowledge source</div>
+        <label for="repoPath">Local path or public GitHub URL</label>
+        <div class="input-shell">
+          <svg viewBox="0 0 24 24"><path d="M3 7h6l2 2h10v10H3z"/></svg>
+          <input id="repoPath" value="" placeholder="/path/to/repository or https://github.com/owner/repo">
+        </div>
+        <label for="repoName">Workspace name</label>
+        <div class="input-shell">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M8 12h8M12 8v8"/></svg>
+          <input id="repoName" value="engineering-rag" placeholder="my-service">
+        </div>
+        <button id="indexButton" class="primary-button">
+          <svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 20h14"/></svg>
+          <span>Index repository</span>
+        </button>
+        <div id="indexStatus" class="status-line"><i></i><span>Ready to index</span></div>
+        <div class="progress-track" aria-hidden="true"><span id="indexProgress"></span></div>
+        <button id="retryIndexButton" class="recovery-button" type="button" hidden>Retry indexing</button>
+      </section>
+
+      <section class="panel-section">
+        <div class="section-heading"><span>Add documents</span><span class="step">02</span></div>
+        <label id="dropZone" class="drop-zone" for="fileUpload">
+          <input id="fileUpload" type="file" multiple accept=".py,.js,.jsx,.ts,.tsx,.java,.go,.rs,.rb,.php,.cs,.c,.cpp,.h,.hpp,.sql,.sh,.yaml,.yml,.json,.toml,.md,.rst,.txt,.graphql,.proto,.pdf,.docx">
+          <input id="folderUpload" type="file" webkitdirectory multiple>
+          <span class="upload-icon">
+            <svg viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M5 15v5h14v-5"/></svg>
+          </span>
+          <strong>Drop files here</strong>
+          <small>or click to browse · 20 MB max</small>
+          <span id="fileCount" class="file-count">PDF, DOCX, code and text</span>
+        </label>
+        <div class="upload-actions">
+          <button id="folderButton" class="folder-button" type="button">
+            <svg viewBox="0 0 24 24"><path d="M3 7h6l2 2h10v10H3z"/></svg><span>Choose folder</span>
+          </button>
+          <button id="uploadButton" class="secondary-button" type="button">
+            <span>Upload and index</span><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg>
+          </button>
+        </div>
+        <p id="uploadStatus" class="helper-text">Files stay private and are processed locally.</p>
+        <div id="uploadReview" class="upload-review" hidden></div>
+        <div class="progress-track" aria-hidden="true"><span id="uploadProgress"></span></div>
+        <details id="uploadedFilesPanel" class="file-panel"><summary>Uploaded files <span id="uploadedFileTotal">0</span></summary><ul id="uploadedFiles"></ul></details>
+      </section>
+    </div>
+
+    <div class="privacy-card">
+      <span class="privacy-icon"><svg viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 4.6 2.9 8 7 10 4.1-2 7-5.4 7-10V6z"/><path d="m9 12 2 2 4-4"/></svg></span>
+      <div><strong>Private by design</strong><p>Models and data remain in your environment.</p></div>
+    </div>
+  </aside>
+  <button id="sidebarBackdrop" class="sidebar-backdrop" type="button" aria-label="Close source controls"></button>
+
+  <main class="workspace">
+    <header class="topbar">
+      <button id="mobileSidebarButton" class="mobile-menu-button" type="button" aria-label="Toggle source controls">☰</button>
+      <div class="title-group">
+        <div class="eyebrow">Engineering workspace</div>
+        <h1>Ask your knowledge base</h1>
+        <div id="activeContext" class="active-context">No workspace selected</div>
+      </div>
+      <div class="topbar-actions">
+        <button id="explorerButton" class="topbar-button" type="button">Files</button>
+        <button id="templatesButton" class="topbar-button" type="button">Templates</button>
+        <button id="analyticsButton" class="topbar-button" type="button">Insights</button>
+        <button id="reportButton" class="topbar-button" type="button">Report</button>
+        <button id="commandButton" class="topbar-button" type="button" aria-label="Open command palette">⌘K</button>
+        <button id="newTopicButton" class="topbar-button" type="button">New topic</button>
+        <button id="themeButton" class="topbar-button" type="button" aria-label="Toggle color theme">☼</button>
+        <a class="docs-link" href="/docs" target="_blank" rel="noopener">API Docs <span>↗</span></a>
+        <span id="health" class="model-badge"><i></i><span>Connecting…</span></span>
+      </div>
+    </header>
+
+    <div id="streamStatus" class="sr-only" aria-live="assertive"></div>
+    <div id="messages" class="messages" aria-live="polite" aria-busy="false">
+      <section class="welcome-state">
+        <div class="welcome-orb">
+          <div class="orb-ring"></div>
+          <svg viewBox="0 0 32 32"><path d="M11 10 5 16l6 6M21 10l6 6-6 6M19 5l-6 22"/></svg>
+        </div>
+        <div class="welcome-copy">
+          <span class="welcome-label">Your private engineering copilot</span>
+          <h2>Turn complex code into<br><em>clear answers.</em></h2>
+          <p>Index a repository or upload documents, then explore architecture, trace behavior, and investigate bugs with source-backed answers.</p>
+        </div>
+        <div class="suggestions">
+          <button data-question="Explain the application architecture and how data flows between its components."><span class="suggestion-icon violet">⌘</span><span><strong>Map the architecture</strong><small>Explain components and data flow</small></span><b>→</b></button>
+          <button data-question="Where does retrieval happen, and how are results ranked?"><span class="suggestion-icon mint">⌕</span><span><strong>Trace implementation</strong><small>Find where retrieval happens</small></span><b>→</b></button>
+          <button data-question="How are errors handled and what are the main failure paths?"><span class="suggestion-icon amber">!</span><span><strong>Investigate a bug</strong><small>Review errors and failure paths</small></span><b>→</b></button>
+        </div>
+        <div class="capability-row"><span>AST-aware</span><i></i><span>Hybrid search</span><i></i><span>Citation verified</span><i></i><span>100% local</span></div>
+      </section>
+    </div>
+
+    <div class="composer-wrap">
+      <button id="workspaceGate" class="workspace-gate" type="button">Choose or index a workspace to start asking questions →</button>
+      <form id="chatForm" class="composer is-disabled">
+        <textarea id="question" rows="1" placeholder="Ask about your code or documents…" required disabled></textarea>
+        <div class="composer-footer">
+          <span><label class="context-toggle"><input id="useHistory" type="checkbox" checked> Use conversation context</label> · <kbd>↵</kbd> send</span>
+          <button type="submit" aria-label="Send message" title="Send message" disabled>
+            <svg viewBox="0 0 24 24"><path d="m5 12 14-7-4 14-3-6zM12 13l7-8"/></svg>
+          </button>
+        </div>
+      </form>
+      <p class="disclaimer">Answers are generated from indexed sources. Verify critical changes before implementation.</p>
+    </div>
+  </main>
+  <dialog id="sourceDrawer" class="source-drawer">
+    <header><div><span id="sourceLanguage">SOURCE</span><strong id="sourcePath">Source preview</strong></div><button id="closeSourceButton" type="button" aria-label="Close source preview">×</button></header>
+    <div id="sourceMeta" class="source-meta"></div>
+    <pre id="sourceCode" tabindex="0"><code></code></pre>
+    <footer><a id="openGitHubButton" href="#" target="_blank" rel="noopener" hidden>Open in GitHub ↗</a><button id="copySourceButton" type="button">Copy source</button></footer>
+  </dialog>
+  <dialog id="onboarding" class="onboarding">
+    <button id="closeOnboarding" class="dialog-close" aria-label="Close guide">×</button>
+    <span class="welcome-label">Get started in three steps</span>
+    <h2>Build your knowledge workspace</h2>
+    <ol><li><b>Choose a source</b><span>Upload documents, select a folder, or paste a public GitHub URL.</span></li><li><b>Index locally</b><span>SourceLens parses, embeds, and validates your knowledge base.</span></li><li><b>Ask grounded questions</b><span>Explore answers, quality indicators, and clickable source citations.</span></li></ol>
+    <button id="startOnboarding" class="primary-button" type="button">Choose a source</button>
+  </dialog>
+  <dialog id="actionDialog" class="action-dialog" aria-labelledby="actionDialogTitle">
+    <form method="dialog">
+      <h2 id="actionDialogTitle">Confirm action</h2>
+      <p id="actionDialogMessage"></p>
+      <label id="actionDialogInputWrap" for="actionDialogInput" hidden>Details<input id="actionDialogInput" maxlength="1000"></label>
+      <div class="dialog-actions"><button id="actionDialogCancel" value="cancel">Cancel</button><button id="actionDialogConfirm" class="primary-button" value="confirm">Confirm</button></div>
+    </form>
+  </dialog>
+  <dialog id="explorerDialog" class="feature-dialog wide-dialog" aria-labelledby="explorerTitle">
+    <header><div><span class="welcome-label">Repository explorer</span><h2 id="explorerTitle">Indexed files</h2></div><button class="dialog-x" data-close="explorerDialog" aria-label="Close repository explorer">×</button></header>
+    <input id="fileSearch" class="feature-search" type="search" placeholder="Filter paths…" aria-label="Filter repository files">
+    <p id="compareHint" class="helper-text">Select up to two files to compare, or open any file.</p>
+    <div id="fileExplorer" class="file-explorer"></div>
+    <footer><button id="compareFilesButton" class="primary-button" type="button" disabled>Compare selected files</button></footer>
+  </dialog>
+  <dialog id="compareDialog" class="feature-dialog compare-dialog" aria-labelledby="compareTitle">
+    <header><h2 id="compareTitle">Source comparison</h2><button class="dialog-x" data-close="compareDialog" aria-label="Close source comparison">×</button></header>
+    <div id="comparePanes" class="compare-panes"></div>
+  </dialog>
+  <dialog id="templatesDialog" class="feature-dialog" aria-labelledby="templatesTitle">
+    <header><div><span class="welcome-label">Reusable analysis</span><h2 id="templatesTitle">Prompt templates</h2></div><button class="dialog-x" data-close="templatesDialog" aria-label="Close prompt templates">×</button></header>
+    <div id="promptTemplates" class="template-grid"></div>
+  </dialog>
+  <dialog id="analyticsDialog" class="feature-dialog" aria-labelledby="analyticsTitle">
+    <header><div><span class="welcome-label">Workspace health</span><h2 id="analyticsTitle">Knowledge insights</h2></div><button class="dialog-x" data-close="analyticsDialog" aria-label="Close workspace insights">×</button></header>
+    <div id="analyticsContent"></div>
+  </dialog>
+  <dialog id="reportDialog" class="feature-dialog wide-dialog report-dialog" aria-labelledby="reportTitle">
+    <header><div><span class="welcome-label">Source-backed analysis</span><h2 id="reportTitle">Conversation report</h2></div><button class="dialog-x" data-close="reportDialog" aria-label="Close report">×</button></header>
+    <div id="reportContent"></div><footer><button id="printReportButton" type="button">Print / Save PDF</button><button id="downloadReportButton" type="button">Download JSON</button></footer>
+  </dialog>
+  <dialog id="commandDialog" class="command-dialog" aria-labelledby="commandTitle">
+    <h2 id="commandTitle" class="sr-only">Command palette</h2><input id="commandSearch" type="search" placeholder="Type a command…" aria-label="Search commands" autocomplete="off"><div id="commandList" role="listbox"></div>
+  </dialog>
+  <section id="indexSummary" class="summary-panel" aria-labelledby="indexSummaryTitle" hidden>
+    <header><h2 id="indexSummaryTitle">Indexing summary</h2><button id="closeSummaryButton" type="button" aria-label="Close indexing summary">×</button></header>
+    <div id="indexSummaryStats" class="summary-stats"></div><ul id="indexSummaryDetails"></ul>
+    <button id="askChangesButton" type="button" hidden>Ask about these changes</button><button id="downloadSummaryButton" type="button">Download details</button>
+  </section>
+  <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+  <script src="/static/app.js?v=20260822-16"></script>
+</body>
+</html>

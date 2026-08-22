@@ -1,0 +1,5 @@
+route:
+  receiver: local-console
+  group_by: [alertname]
+receivers:
+  - name: local-console

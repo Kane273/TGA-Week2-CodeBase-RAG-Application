@@ -1,0 +1,15 @@
+.venv/
+.uv-cache/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.rag_data/
+.env
+.DS_Store
+.coverage
+htmlcov/
+coverage.xml
+*.log
+*.pem
+*.key
+*.p12
