@@ -34,12 +34,14 @@ class Settings(BaseSettings):
     max_retrieval_hops: int = 3
     max_retrieval_tool_calls: int = 6
     multi_query_count: int = 3
-    parent_context_chunks: int = 2
-    retrieval_candidate_k: int = 24
-    rerank_candidate_k: int = 24
+    parent_context_chunks: int = 1
+    retrieval_candidate_k: int = 16
+    rerank_candidate_k: int = 16
     retrieval_parallelism: int = 3
     index_batch_size: int = 64
     context_max_characters: int = 48_000
+    context_max_chunks: int = 12
+    context_max_chunks_per_file: int = 3
     query_plan_cache_ttl_seconds: int = 900
     embedding_cache_enabled: bool = True
     max_concurrent_model_requests: int = 2

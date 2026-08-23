@@ -1,4 +1,5 @@
 import hashlib
+import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -19,6 +20,25 @@ from app.ingestion import (
 )
 from app.parsing import build_document_parser
 from app.performance import CACHE_EVENTS, RETRIEVAL_RESULTS, stage_timer
+
+
+TOKEN_PATTERN = re.compile(r"[A-Za-z][A-Za-z0-9_./-]*")
+STOP_TERMS = {
+    "a", "an", "and", "are", "as", "at", "be", "before", "by", "does", "for",
+    "from", "how", "in", "into", "is", "it", "of", "on", "or", "the", "to",
+    "what", "when", "where", "which", "with",
+}
+
+
+def _search_terms(value: str) -> set[str]:
+    terms: set[str] = set()
+    for token in TOKEN_PATTERN.findall(value):
+        lowered = token.lower()
+        if lowered not in STOP_TERMS:
+            terms.add(lowered)
+        terms.update(part for part in re.split(r"[_./-]+", lowered)
+                     if len(part) > 1 and part not in STOP_TERMS)
+    return terms
 
 
 class VectorStore(Protocol):
@@ -240,10 +260,16 @@ class RepositoryIndex:
         effective_branch = (filters or {}).get("branch") or branch
         if effective_branch:
             clauses.append({"branch": effective_branch})
-        for key in ("language", "path"):
-            value = (filters or {}).get(key)
-            if value:
-                clauses.append({key: value})
+        language = str((filters or {}).get("language", "")).strip().lower()
+        aliases = {
+            "python": "py", "javascript": "js", "typescript": "ts",
+            "c#": "cs", "csharp": "cs", "c++": "cpp", "markdown": "md",
+        }
+        if language and language not in {"all", "any", "*"}:
+            clauses.append({"language": aliases.get(language, language.lstrip("."))})
+        path = str((filters or {}).get("path", "")).strip()
+        if path:
+            clauses.append({"path": path})
         return clauses[0] if len(clauses) == 1 else {"$and": clauses}
 
     def _stored_documents(self, repository: str, branch: str | None,
@@ -331,8 +357,52 @@ class RepositoryIndex:
             CACHE_EVENTS.labels("reranker", "hit").inc(len(candidates))
         if len(self._rerank_cache) > 50_000:
             self._rerank_cache.clear()
-        return [doc for _, doc in sorted(zip(scores, candidates),
-                                        key=lambda item: float(item[0]), reverse=True)[:k]]
+        query_terms = _search_terms(query)
+
+        def adjusted(item: tuple[float | None, Document]) -> float:
+            score, document = item
+            metadata = document.metadata
+            path = str(metadata.get("path", "")).lower()
+            symbol_terms = _search_terms(str(metadata.get("symbol", "")))
+            path_terms = _search_terms(path)
+            content_terms = _search_terms(document.page_content[:4000])
+            exact_symbol = 1.5 if query_terms & symbol_terms else 0.0
+            path_match = 0.8 * len(query_terms & path_terms)
+            identifier_match = 0.12 * min(len(query_terms & content_terms), 5)
+            source_prior = 0.0
+            if path.startswith("app/"):
+                source_prior += 0.75
+            elif path.startswith("scripts/"):
+                source_prior += 0.25
+            if path.startswith("tests/"):
+                source_prior -= 0.45
+            if path in {"readme.md", "project_report.md"} or path.startswith("docs/"):
+                source_prior -= 0.2
+            if path.endswith((".lock", "-lock.yaml", "lock.json")):
+                source_prior -= 1.0
+            return float(score or 0.0) + exact_symbol + path_match + identifier_match + source_prior
+
+        ranked = [document for _, document in sorted(
+            zip(scores, candidates), key=adjusted, reverse=True
+        )]
+        return self._diversify(ranked, k, self.settings.context_max_chunks_per_file)
+
+    @staticmethod
+    def _diversify(documents: list[Document], k: int, max_per_path: int = 3) -> list[Document]:
+        selected: list[Document] = []
+        counts: dict[str, int] = {}
+        seen: set[str] = set()
+        for document in documents:
+            identifier = str(document.metadata.get("chunk_id", id(document)))
+            path = str(document.metadata.get("path", ""))
+            if identifier in seen or counts.get(path, 0) >= max_per_path:
+                continue
+            seen.add(identifier)
+            counts[path] = counts.get(path, 0) + 1
+            selected.append(document)
+            if len(selected) >= k:
+                break
+        return selected
 
     def index(self, root: Path, repository: str, branch: str,
               collection_name: str | None = None, full_rebuild: bool = False,
@@ -436,11 +506,26 @@ class RepositoryIndex:
             with stage_timer("sparse_retrieval"):
                 sparse = bm25.invoke(query)
 
+        terms = _search_terms(query)
+        lexical = sorted(
+            candidates,
+            key=lambda doc: (
+                len(terms & _search_terms(str(doc.metadata.get("symbol", "")))) * 5
+                + len(terms & _search_terms(str(doc.metadata.get("path", "")))) * 3
+                + len(terms & _search_terms(doc.page_content[:8000]))
+                + (1 if str(doc.metadata.get("path", "")).startswith("app/") else 0)
+            ),
+            reverse=True,
+        )[:candidate_k]
+
         if tool == "symbol_search":
-            terms = {term.lower() for term in query.replace(".", " ").split() if len(term) > 2}
             sparse = sorted(
                 candidates,
-                key=lambda doc: len(terms & set(str(doc.metadata.get("symbol", "")).lower().split())),
+                key=lambda doc: (
+                    len(terms & _search_terms(str(doc.metadata.get("symbol", "")))) * 3
+                    + len(terms & _search_terms(str(doc.metadata.get("path", "")))) * 2
+                    + len(terms & _search_terms(doc.page_content[:4000]))
+                ),
                 reverse=True,
             )[:candidate_k]
         elif tool == "dependency_search":
@@ -453,7 +538,9 @@ class RepositoryIndex:
                 bm25.k = candidate_k
                 sparse = bm25.invoke(query)
 
-        fused = self.reciprocal_rank_fusion([(dense, 1.0), (sparse, 0.85)])
+        fused = self.reciprocal_rank_fusion([
+            (dense, 1.0), (sparse, 0.85), (lexical, 1.1),
+        ])
         if not fused:
             return []
         return self._rerank(query, repository, fused, k) if rerank else fused[:candidate_k]
@@ -506,6 +593,12 @@ class RepositoryIndex:
         workers = max(1, min(len(selected), self.settings.retrieval_parallelism))
         with ThreadPoolExecutor(max_workers=workers) as pool:
             rankings = list(pool.map(run, selected))
+        if filters and not any(documents for _, documents in rankings):
+            def run_without_filters(tool: str):
+                return tool, self.retrieve(query, repository, branch, k=k,
+                                           filters={}, tool=tool, rerank=False)
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                rankings = list(pool.map(run_without_filters, selected))
         calls.extend(tool for tool, _ in rankings)
         fused = self.reciprocal_rank_fusion([
             (documents, 1.0 if tool == "hybrid_search" else 0.75)
@@ -513,8 +606,12 @@ class RepositoryIndex:
         ])
         primary = self._rerank(query, repository, fused, k)
         expanded = self.expand_parent_context(primary, repository, branch)
-        RETRIEVAL_RESULTS.observe(len(expanded))
-        return expanded, calls
+        final = self._rerank(
+            query, repository, expanded,
+            min(self.settings.context_max_chunks, max(k, len(primary))),
+        )
+        RETRIEVAL_RESULTS.observe(len(final))
+        return final, calls
 
     def source_preview(self, repository: str, branch: str | None, path: str,
                        start_line: int, end_line: int, padding_chunks: int = 1) -> dict:

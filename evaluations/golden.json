@@ -1,18 +1,32 @@
 [
-  {
-    "question": "Where is the LangGraph workflow assembled?",
-    "expected_paths": ["app/graph.py"]
-  },
-  {
-    "question": "How are repository source files divided into AST-aware chunks?",
-    "expected_paths": ["app/ingestion.py"]
-  },
-  {
-    "question": "Where is repository access authorization enforced?",
-    "expected_paths": ["app/security.py", "app/main.py"]
-  },
-  {
-    "question": "How is a new index version activated?",
-    "expected_paths": ["app/jobs.py"]
-  }
+  {"question": "Where is the LangGraph workflow assembled?", "expected_paths": ["app/graph.py"]},
+  {"question": "How are repository source files divided into AST-aware chunks?", "expected_paths": ["app/ingestion.py"]},
+  {"question": "Where is repository access authorization enforced?", "expected_paths": ["app/security.py", "app/main.py"]},
+  {"question": "How is a new index version activated after indexing completes?", "expected_paths": ["app/jobs.py", "app/main.py", "app/retrieval.py"]},
+  {"question": "How does the application validate and clone a public GitHub repository?", "expected_paths": ["app/github.py", "app/main.py"]},
+  {"question": "How are individual files and folder uploads accepted and indexed?", "expected_paths": ["app/main.py", "app/ingestion.py"]},
+  {"question": "How does the application choose between Chroma and Pinecone vector storage?", "expected_paths": ["app/retrieval.py", "app/config.py"]},
+  {"question": "How are dense and BM25 results combined during hybrid retrieval?", "expected_paths": ["app/retrieval.py"]},
+  {"question": "How are embeddings cached to avoid recomputing unchanged content?", "expected_paths": ["app/embedding_cache.py", "app/retrieval.py"]},
+  {"question": "How does the retrieval planner rewrite follow-up questions and generate multiple queries?", "expected_paths": ["app/planning.py", "app/graph.py"]},
+  {"question": "How are self-query metadata filters validated and restricted?", "expected_paths": ["app/planning.py", "app/retrieval.py"]},
+  {"question": "How does parent-document expansion add neighboring code chunks?", "expected_paths": ["app/retrieval.py"]},
+  {"question": "How does the application rerank retrieved code before generation?", "expected_paths": ["app/retrieval.py"]},
+  {"question": "How is the final prompt context bounded and deduplicated?", "expected_paths": ["app/context.py", "app/graph.py"]},
+  {"question": "How are generated source citations validated and repaired?", "expected_paths": ["app/graph.py"]},
+  {"question": "How are answer relevance and faithfulness evaluated without an external API key?", "expected_paths": ["app/evaluation.py", "scripts/evaluate.py"]},
+  {"question": "How are retrieval recall and mean reciprocal rank calculated?", "expected_paths": ["app/evaluation.py"]},
+  {"question": "How is optional LangSmith tracing configured and kept disabled without a key?", "expected_paths": ["app/observability.py", "app/config.py"]},
+  {"question": "How does LangGraph conversation state persist in memory or PostgreSQL?", "expected_paths": ["app/checkpoints.py", "app/graph.py"]},
+  {"question": "How are background repository indexing jobs executed and retried?", "expected_paths": ["app/jobs.py", "scripts/worker.py"]},
+  {"question": "How do temporary uploaded workspaces survive a browser refresh?", "expected_paths": ["app/local_workspaces.py", "app/main.py"]},
+  {"question": "Where are chat model, embedding model, retrieval, and security settings defined?", "expected_paths": ["app/config.py"]},
+  {"question": "How does ingestion prevent secrets and sensitive files from being embedded?", "expected_paths": ["app/ingestion.py"]},
+  {"question": "How are PDF, DOCX, and text documents parsed behind a provider-neutral interface?", "expected_paths": ["app/parsing.py"]},
+  {"question": "How does the application scan uploaded content for malware?", "expected_paths": ["app/malware.py", "app/main.py"]},
+  {"question": "How are outbound HTTP requests constrained against unsafe destinations?", "expected_paths": ["app/http_controls.py", "app/github.py"]},
+  {"question": "How does the streaming chat endpoint execute and expose LangGraph progress?", "expected_paths": ["app/main.py", "app/graph.py", "frontend/app.js"]},
+  {"question": "How are evidence-aware follow-up questions produced after an answer?", "expected_paths": ["app/suggestions.py", "app/main.py"]},
+  {"question": "How are repositories, index versions, and access grants stored in the database?", "expected_paths": ["app/database.py", "app/schemas.py"]},
+  {"question": "How can an operator back up and restore application data?", "expected_paths": ["scripts/backup.sh", "scripts/restore.sh"]}
 ]

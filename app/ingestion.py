@@ -22,8 +22,10 @@ SUPPORTED_EXTENSIONS = {
     ".pdf", ".docx",
 }
 IGNORED_DIRS = {
-    ".git", ".rag_data", ".venv", "venv", "node_modules", "dist", "build",
-    "coverage", ".next", "target", "vendor", "__pycache__",
+    ".git", ".rag_data", ".venv", "venv", ".uv-cache", ".pytest_cache",
+    "node_modules", "dist", "build", "coverage", ".next", "target", "vendor",
+    "evaluations",
+    "__pycache__",
 }
 SENSITIVE_NAMES = {".env", ".env.local", "id_rsa", "id_ed25519", "credentials", "credentials.json"}
 SECRET_PATTERNS = [
@@ -228,7 +230,8 @@ def chunk_file(path: Path, root: Path, repository: str, branch: str,
             "symbol_type": symbol_type,
             "parser": parsed.parser,
             "chunk_id": hashlib.sha256(
-                f"{repository}:{branch}:{rel_path}:{start_line}:{symbol_type}".encode()
+                f"{repository}:{branch}:{rel_path}:{start_line}:{end_line}:"
+                f"{symbol_type}:{symbol}:{hashlib.sha256(content.encode()).hexdigest()}".encode()
             ).hexdigest(),
         }
         documents.append(Document(page_content=content, metadata=metadata))

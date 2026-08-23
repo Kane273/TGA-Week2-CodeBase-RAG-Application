@@ -63,6 +63,15 @@ def test_self_query_filters_are_combined_with_repository_scope():
     ]}
 
 
+def test_self_query_normalizes_human_language_labels():
+    assert RepositoryIndex._filtered_where("demo", "main", {"language": "Python"}) == {
+        "$and": [{"repository": "demo"}, {"branch": "main"}, {"language": "py"}]
+    }
+    assert RepositoryIndex._filtered_where("demo", "main", {"language": "All"}) == {
+        "$and": [{"repository": "demo"}, {"branch": "main"}]
+    }
+
+
 def test_parent_expansion_adds_neighboring_chunks():
     index = bare_index()
     docs = [document("one", "app.py", 1), document("two", "app.py", 11),
@@ -86,3 +95,17 @@ def test_tool_execution_is_allow_listed_and_budgeted():
     assert docs == [hit]
     assert calls == ["hybrid_search", "symbol_search"]
     assert index.retrieve.call_count == 2
+
+
+def test_filtered_retrieval_retries_without_planner_filters_when_empty():
+    index = bare_index()
+    hit = document("one", "app.py", 1)
+    index.retrieve = Mock(side_effect=[[], [hit]])
+    index._rerank = Mock(return_value=[hit])
+    index.expand_parent_context = Mock(return_value=[hit])
+    docs, calls = index.retrieve_with_tools(
+        "auth", "demo", "main", {"language": "Python"}, ["hybrid_search"], max_calls=1,
+    )
+    assert docs == [hit]
+    assert calls == ["hybrid_search"]
+    assert index.retrieve.call_args_list[1].kwargs["filters"] == {}

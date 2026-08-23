@@ -7,6 +7,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - run: ./scripts/check-sensitive-files.sh
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true

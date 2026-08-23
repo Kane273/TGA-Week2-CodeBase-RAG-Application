@@ -25,6 +25,7 @@ dependencies = [
     "sentence-transformers>=5.2,<6",
     "transformers>=5.2,<6",
     "tree-sitter-language-pack>=0.7,<1",
+    "tree-sitter>=0.25,<0.26",
     "opentelemetry-exporter-otlp-proto-grpc>=1.29,<2",
     "opentelemetry-instrumentation-fastapi>=0.50b0,<1",
     "opentelemetry-sdk>=1.29,<2",

@@ -69,7 +69,9 @@ def deterministic_answer_metrics(question: str, answer: str, documents: list[Doc
     retrieved_paths = {str(doc.metadata.get("path", "")) for doc in documents}
     context_precision = (len(retrieved_paths & expected) / len(retrieved_paths)
                          if retrieved_paths else 0.0)
-    context_recall = len(retrieved_paths & expected) / max(len(expected), 1)
+    # expected_paths are acceptable evidence locations (retrieval passes on any match),
+    # so answer-context recall must use the same case-level definition.
+    context_recall = 1.0 if retrieved_paths & expected else 0.0
 
     matches = CITATION_PATTERN.findall(answer)
     valid = [(path, start, end) for path, start, end in matches
@@ -189,7 +191,10 @@ def evaluate_golden_dataset(index, dataset_path: Path, repository: str,
     reciprocal_ranks: list[float] = []
     details = []
     for case in cases:
-        documents = index.retrieve(case["question"], repository, branch)
+        documents, _ = index.retrieve_with_tools(
+            case["question"], repository, branch, filters={},
+            tools=["hybrid_search"], k=8, max_calls=1,
+        )
         paths = [doc.metadata["path"] for doc in documents]
         expected = set(case["expected_paths"])
         ranks = [position + 1 for position, path in enumerate(paths) if path in expected]

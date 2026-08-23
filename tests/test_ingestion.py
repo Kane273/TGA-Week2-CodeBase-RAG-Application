@@ -35,6 +35,26 @@ def test_ignored_directories_are_not_indexed(tmp_path: Path):
     assert [p.name for p in iter_source_files(tmp_path, 10)] == ["app.js"]
 
 
+@pytest.mark.parametrize("directory", [".uv-cache", ".pytest_cache", "evaluations"])
+def test_tool_cache_directories_are_not_indexed(tmp_path: Path, directory: str):
+    ignored = tmp_path / directory
+    ignored.mkdir()
+    (ignored / "cached.py").write_text("cached = True")
+    (tmp_path / "service.py").write_text("service = True")
+    assert [path.name for path in iter_source_files(tmp_path, 10)] == ["service.py"]
+
+
+def test_ast_chunks_have_unique_content_addressed_ids(tmp_path: Path):
+    source = tmp_path / "service.py"
+    source.write_text(
+        "@classmethod\ndef first(cls):\n    return 1\n\n"
+        "@classmethod\ndef second(cls):\n    return 2\n"
+    )
+    documents = chunk_file(source, tmp_path, "demo", "main")
+    identifiers = [document.metadata["chunk_id"] for document in documents]
+    assert len(identifiers) == len(set(identifiers))
+
+
 def test_secret_bearing_source_is_excluded(tmp_path: Path):
     source = tmp_path / "config.py"
     source.write_text('api_key = "this-is-a-secret-value"\n')
