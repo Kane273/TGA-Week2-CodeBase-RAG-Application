@@ -5,11 +5,14 @@ jobs:
   test-and-scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: ./scripts/check-sensitive-files.sh
-      - uses: astral-sh/setup-uv@v6
-        with: {enable-cache: true}
-      - run: uv sync --frozen
+      - uses: astral-sh/setup-uv@v9
+        with:
+          enable-cache: true
+          version: "0.12.5"
+      - run: uv lock --check
+      - run: uv sync --locked
       - run: uv run pytest
       - run: uvx pip-audit
       - uses: aquasecurity/trivy-action@v0.36.0
