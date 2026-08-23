@@ -1,0 +1,10 @@
+{
+  "answer_relevance": 0.70,
+  "faithfulness": 0.70,
+  "context_precision": 0.20,
+  "context_recall": 0.80,
+  "citation_precision": 1.0,
+  "citation_completeness": 0.80,
+  "retrieval_recall": 0.80,
+  "p95_latency_ms": 10000
+}

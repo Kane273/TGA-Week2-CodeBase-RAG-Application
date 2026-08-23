@@ -31,6 +31,16 @@ def test_expired_workspace_is_not_restored(tmp_path):
     assert not store._path("abcdef1234").exists()
 
 
+def test_expired_lists_records_without_deleting_cleanup_metadata(tmp_path):
+    store = TemporaryWorkspaceStore(tmp_path, ttl_hours=72)
+    state = store.save("abcdef1234", "demo", ["app.py"], status="ready")
+    state["expires_at"] = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+    store._path("abcdef1234").write_text(__import__("json").dumps(state))
+
+    assert [item["id"] for item in store.expired()] == ["abcdef1234"]
+    assert store._path("abcdef1234").exists()
+
+
 def test_interrupted_indexing_is_marked_for_retry(tmp_path):
     store = TemporaryWorkspaceStore(tmp_path)
     store.save("abcdef1234", "demo", ["app.py"], status="indexing")

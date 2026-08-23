@@ -18,11 +18,11 @@ from app.config import get_settings
 from app.checkpoints import build_checkpointer
 from app.database import (IndexJob, IndexVersion, RepositoryGrant, RepositoryRecord, audit,
                           init_database, session_scope)
-from app.evaluation import deterministic_answer_metrics
+from app.evaluation import deterministic_answer_metrics, semantic_answer_relevance
 from app.graph import build_graph, cited_documents
 from app.github import clone_public_repository, validate_public_github_url
 from app.ingestion import (SENSITIVE_NAMES, SUPPORTED_EXTENSIONS, detect_branch,
-                           load_manifest, remove_manifest_entry, safe_repository_path,
+                           LANGUAGE_BY_EXTENSION, load_manifest, remove_manifest_entry, safe_repository_path,
                            sensitive_content_reason)
 from app.jobs import IndexJobManager
 from app.http_controls import install_http_controls
@@ -30,11 +30,12 @@ from app.local_jobs import LocalJobStore
 from app.local_workspaces import TemporaryWorkspaceStore
 from app.malware import MalwareDetected, scan_bytes
 from app.observability import configure_langsmith, configure_telemetry
+from app.performance import ANSWER_QUALITY
 from app.retrieval import RepositoryIndex
 from app.schemas import (ChatRequest, ChatResponse, Citation, GitHubIndexRequest,
                          FeedbackRequest, IndexRequest, IndexResponse, GrantCreate, JobResponse,
                          RepositoryCreate, RepositoryResponse,
-                         RollbackRequest)
+                         RollbackRequest, WorkspaceRetentionRequest)
 from app.security import (Principal, authorize_repository, current_principal,
                           require_admin)
 from app.suggestions import follow_up_questions
@@ -45,7 +46,7 @@ index = RepositoryIndex(settings)
 checkpoint_handle = build_checkpointer(settings)
 graph = build_graph(settings, index, checkpoint_handle.saver)
 job_manager = IndexJobManager(settings, index)
-local_upload_jobs: dict[str, dict] = {}
+local_upload_job_store = LocalJobStore(settings.rag_data_dir / "jobs" / "uploads")
 github_job_store = LocalJobStore(settings.rag_data_dir / "jobs" / "github")
 feedback_store = LocalJobStore(settings.rag_data_dir / "feedback")
 upload_workspace_store = TemporaryWorkspaceStore(
@@ -65,12 +66,24 @@ app.mount("/metrics", make_asgi_app(), name="metrics")
 
 
 def cleanup_expired_workspaces() -> int:
-    expired = upload_workspace_store.purge_expired()
+    expired = upload_workspace_store.expired()
     for workspace in expired:
-        index.delete_repository_documents(workspace["repository"], workspace.get("branch"))
+        vector_cleanup_succeeded = True
+        try:
+            index.delete_repository_documents(workspace["repository"], workspace.get("branch"))
+        except Exception:
+            # Uploaded source files must still expire if a damaged/unavailable vector store
+            # prevents deletion of their derived embeddings. Keep the expired metadata so
+            # a later cleanup pass can retry the vector deletion.
+            vector_cleanup_succeeded = False
+        remove_manifest_entry(
+            settings, workspace["repository"], workspace.get("branch", "uploads")
+        )
         upload_root = settings.rag_data_dir / "uploads" / workspace["id"]
         if upload_root.exists():
             shutil.rmtree(upload_root)
+        if vector_cleanup_succeeded:
+            upload_workspace_store.delete(workspace["id"])
     return len(expired)
 
 
@@ -99,6 +112,7 @@ def startup():
     init_database()
     checkpoint_handle.start()
     github_job_store.fail_interrupted()
+    local_upload_job_store.fail_interrupted()
     migrate_existing_upload_workspaces()
     upload_workspace_store.fail_interrupted()
     cleanup_expired_workspaces()
@@ -316,6 +330,21 @@ def get_index_job(job_id: str, principal: Principal = Depends(current_principal)
         return JobResponse.model_validate(job, from_attributes=True)
 
 
+@app.get("/api/index-jobs", response_model=list[JobResponse])
+def list_index_jobs(principal: Principal = Depends(current_principal)):
+    with session_scope() as session:
+        query = session.query(IndexJob).order_by(IndexJob.created_at.desc())
+        jobs = query.limit(100).all()
+        visible = []
+        for job in jobs:
+            try:
+                authorize_repository(principal, job.repository_id)
+                visible.append(JobResponse.model_validate(job, from_attributes=True))
+            except HTTPException:
+                continue
+        return visible
+
+
 @app.post("/api/uploads")
 async def upload_documents(
     files: list[UploadFile] = File(...),
@@ -341,6 +370,7 @@ async def upload_documents(
     upload_root.mkdir(parents=True, exist_ok=True)
     saved: list[str] = []
     skipped: list[str] = []
+    duplicates: list[str] = []
     for uploaded in files:
         original = uploaded.filename or ""
         if "\\" in original:
@@ -380,11 +410,19 @@ async def upload_documents(
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Unsafe filename: {original}")
         destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.is_file() and hashlib.sha256(destination.read_bytes()).digest() == hashlib.sha256(content).digest():
+            duplicates.append(relative_name)
+            continue
         temporary = destination.with_name(f".{destination.name}.uploading")
         temporary.write_bytes(content)
         temporary.replace(destination)
         saved.append(relative_name)
 
+    if not saved and duplicates:
+        return {"files": [], "skipped": skipped, "duplicates": duplicates,
+                "repository": repository,
+                "workspace": upload_workspace_store.get(storage_key),
+                "message": "All selected files already exist with identical content"}
     if not saved:
         raise HTTPException(status_code=415,
                             detail="No supported, non-sensitive files were selected")
@@ -411,35 +449,41 @@ async def upload_documents(
             session.flush()
             job_response = JobResponse.model_validate(job, from_attributes=True)
         job_manager.submit(job_response.id)
-        return {"files": saved, "skipped": skipped, "repository": repository, "job": job_response.model_dump(),
+        return {"files": saved, "skipped": skipped, "duplicates": duplicates,
+                "repository": repository, "job": job_response.model_dump(),
                 "status_url": f"/api/index-jobs/{job_response.id}"}
 
     local_job_id = str(uuid.uuid4())
-    local_upload_jobs[local_job_id] = {
+    local_upload_job_store.save({
         "id": local_job_id, "status": "queued", "progress": 0,
         "message": "Upload saved; waiting to index", "repository": repository,
-    }
+        "kind": "upload", "retryable": True,
+    })
 
     def run_local_upload_index():
-        state = local_upload_jobs[local_job_id]
-        state.update(status="running", progress=20, message="Creating local embeddings")
+        local_upload_job_store.update(local_job_id, status="running", progress=20,
+                                      message="Creating local embeddings")
         try:
             result = index.index(upload_root, repository, "uploads")
-            state.update(status="complete", progress=100,
-                         message=f"Indexed {result.files} files into {result.chunks} chunks",
-                         result=result.__dict__)
+            state = local_upload_job_store.update(
+                local_job_id, status="complete", progress=100,
+                message=f"Indexed {result.files} files into {result.chunks} chunks",
+                result=result.__dict__, retryable=False,
+            )
             upload_workspace_store.update(
                 storage_key, status="ready", branch="uploads",
                 message=state["message"], chunks=result.chunks,
             )
         except Exception as exc:
-            state.update(status="failed", progress=100, message=str(exc))
+            local_upload_job_store.update(local_job_id, status="failed", progress=100,
+                                          message=str(exc), retryable=True)
             upload_workspace_store.update(storage_key, status="failed", message=str(exc))
 
     job_manager.executor.submit(run_local_upload_index)
-    return {"files": saved, "skipped": skipped, "repository": repository,
+    return {"files": saved, "skipped": skipped, "duplicates": duplicates,
+            "repository": repository,
             "workspace": upload_workspace_store.get(storage_key),
-            "job": local_upload_jobs[local_job_id],
+            "job": local_upload_job_store.get(local_job_id),
             "status_url": f"/api/upload-jobs/{local_job_id}"}
 
 
@@ -456,22 +500,52 @@ def list_local_sources(principal: Principal = Depends(current_principal)):
     if settings.auth_enabled:
         raise HTTPException(status_code=404, detail="Local sources are disabled")
     cleanup_expired_workspaces()
-    temporary = {item["repository"]: item for item in upload_workspace_store.active()}
+    temporary = {
+        (item["repository"], item.get("branch", "uploads")): item
+        for item in upload_workspace_store.active()
+    }
     sources = []
     for entry in load_manifest(settings).values():
         repository = entry.get("repository")
         branch = entry.get("branch")
         if not repository or not branch:
             continue
-        workspace = temporary.get(repository, {})
+        workspace = temporary.get((repository, branch), {})
         identifier = hashlib.sha256(f"{repository}:{branch}".encode()).hexdigest()[:16]
+        file_manifest = entry.get("files", {})
+        file_details = []
+        for path, metadata in sorted(file_manifest.items()):
+            extension = Path(path).suffix.lower()
+            chunk_types = metadata.get("chunk_types", [])
+            if any(kind not in {"text_chunk", "module_context"} for kind in chunk_types):
+                strategy = "Tree-sitter AST symbols"
+            elif extension == ".pdf":
+                strategy = "PDF text extraction"
+            elif extension == ".docx":
+                strategy = "DOCX text extraction"
+            elif extension in LANGUAGE_BY_EXTENSION:
+                strategy = "AST-aware code parsing"
+            else:
+                strategy = "Recursive text splitting"
+            file_details.append({
+                "path": path,
+                "type": extension.lstrip(".").upper() or "TEXT",
+                "parser": ", ".join(metadata.get("parsers", [])) or "local",
+                "strategy": strategy,
+                "chunks": len(metadata.get("chunk_ids", [])),
+            })
         sources.append({
             "id": workspace.get("id", identifier), "repository": repository,
             "branch": branch, "file_count": entry.get("file_count", 0),
             "chunks": entry.get("chunks", 0), "status": workspace.get("status", "ready"),
             "expires_at": workspace.get("expires_at"),
-            "files": sorted(entry.get("files", {})),
+            "files": sorted(file_manifest), "file_details": file_details,
             "temporary": bool(workspace),
+            "storage_bytes": sum(
+                (settings.rag_data_dir / "uploads" / workspace.get("id", "") / path).stat().st_size
+                for path in file_manifest
+                if workspace and (settings.rag_data_dir / "uploads" / workspace.get("id", "") / path).is_file()
+            ),
         })
     return sorted(sources, key=lambda item: (item["repository"], item["branch"]))
 
@@ -491,12 +565,63 @@ def delete_local_workspace(workspace_id: str,
         shutil.rmtree(upload_root)
 
 
+@app.patch("/api/local-workspaces/{workspace_id}/retention")
+def extend_local_workspace(workspace_id: str, payload: WorkspaceRetentionRequest,
+                           principal: Principal = Depends(current_principal)):
+    if settings.auth_enabled:
+        raise HTTPException(status_code=404, detail="Local workspace not found")
+    try:
+        return upload_workspace_store.extend(workspace_id, payload.hours)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Local workspace not found") from exc
+
+
+@app.post("/api/local-workspaces/{workspace_id}/reindex", status_code=202)
+def reindex_local_workspace(workspace_id: str,
+                            principal: Principal = Depends(current_principal)):
+    if settings.auth_enabled:
+        raise HTTPException(status_code=404, detail="Local workspace not found")
+    workspace = upload_workspace_store.get(workspace_id, include_expired=True)
+    upload_root = settings.rag_data_dir / "uploads" / workspace_id
+    if not workspace or not upload_root.exists():
+        raise HTTPException(status_code=404, detail="Uploaded source files are no longer available")
+    job_id = str(uuid.uuid4())
+    local_upload_job_store.save({"id": job_id, "kind": "reindex", "status": "queued",
+                                 "progress": 0, "message": "Reindex queued",
+                                 "repository": workspace["repository"], "retryable": True})
+    def run_reindex():
+        try:
+            local_upload_job_store.update(job_id, status="running", progress=20,
+                                          message="Rebuilding uploaded workspace")
+            result = index.index(upload_root, workspace["repository"],
+                                 workspace.get("branch", "uploads"), full_rebuild=True)
+            local_upload_job_store.update(job_id, status="complete", progress=100,
+                                          message="Reindex complete", result=result.__dict__,
+                                          retryable=False)
+            upload_workspace_store.update(workspace_id, status="ready", chunks=result.chunks,
+                                          message="Reindex complete")
+        except Exception as exc:
+            local_upload_job_store.update(job_id, status="failed", progress=100,
+                                          message=str(exc), retryable=True)
+    job_manager.executor.submit(run_reindex)
+    return {"job": local_upload_job_store.get(job_id),
+            "status_url": f"/api/upload-jobs/{job_id}"}
+
+
+@app.get("/api/local-jobs")
+def list_local_jobs(principal: Principal = Depends(current_principal)):
+    if settings.auth_enabled:
+        raise HTTPException(status_code=404, detail="Local jobs are disabled")
+    jobs = [*github_job_store.all(), *local_upload_job_store.all()]
+    return sorted(jobs, key=lambda item: item.get("updated_at", ""), reverse=True)[:100]
+
+
 @app.get("/api/upload-jobs/{job_id}")
 def get_local_upload_job(job_id: str,
                          principal: Principal = Depends(current_principal)):
     if settings.auth_enabled:
         raise HTTPException(status_code=404, detail="Local upload job not found")
-    job = local_upload_jobs.get(job_id)
+    job = local_upload_job_store.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Local upload job not found")
     return job
@@ -610,7 +735,9 @@ def graph_input(request: ChatRequest) -> dict:
 
 
 def retrieval_diagnostics(result: dict) -> dict:
-    return {
+    score_fields = ("dense_rank", "sparse_rank", "lexical_rank", "sparse_score",
+                    "fusion_score", "reranker_score", "final_score")
+    quality = {
         "rewritten_question": result.get("rewritten_question", ""),
         "queries": result.get("retrieval_queries", []),
         "filters": result.get("retrieval_filters", {}),
@@ -618,6 +745,13 @@ def retrieval_diagnostics(result: dict) -> dict:
         "hops": result.get("retrieval_hop", 0),
         "top_k": result.get("retrieval_k", 0),
         "retrieved_chunks": len(result.get("documents", [])),
+        "ranking": [
+            {"path": document.metadata.get("path"),
+             "start_line": document.metadata.get("start_line"),
+             **{field: document.metadata.get(field) for field in score_fields
+                if document.metadata.get(field) is not None}}
+            for document in result.get("documents", [])[:12]
+        ],
     }
 
 
@@ -628,21 +762,33 @@ def answer_quality(result: dict, question: str, latency_ms: int | None = None) -
     metrics = deterministic_answer_metrics(
         question, result.get("answer", ""), documents, expected_paths
     )
+    relevance = semantic_answer_relevance(
+        question, result.get("answer", ""), index.embeddings,
+        fallback=metrics["answer_relevance"],
+    )
     return {
         "grounded": (not result.get("validation_errors")
                      and metrics["citation_precision"] == 1.0
                      and metrics["citation_completeness"] >= 0.8),
-        "answer_relevance": metrics["answer_relevance"],
+        "answer_relevance": relevance,
+        "answer_relevance_method": "local_embedding_cosine",
         "faithfulness": metrics["faithfulness"],
         "citation_precision": metrics["citation_precision"],
         "citation_completeness": metrics["citation_completeness"],
         "latency_ms": latency_ms,
     }
+    for metric in ("answer_relevance", "faithfulness", "citation_precision",
+                   "citation_completeness"):
+        ANSWER_QUALITY.labels(metric).observe(quality[metric])
+    return quality
 
 
 def citations_for(result: dict) -> list[Citation]:
+    score_fields = ("dense_rank", "sparse_rank", "lexical_rank", "sparse_score",
+                    "fusion_score", "reranker_score", "final_score")
     return [Citation(path=d.metadata["path"], start_line=d.metadata["start_line"],
-                     end_line=d.metadata["end_line"], branch=d.metadata["branch"])
+                     end_line=d.metadata["end_line"], branch=d.metadata["branch"],
+                     **{field: d.metadata.get(field) for field in score_fields})
             for d in cited_documents(result.get("answer", ""), result.get("documents", []))]
 
 

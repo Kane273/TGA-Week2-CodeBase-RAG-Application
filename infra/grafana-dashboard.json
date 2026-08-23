@@ -1,0 +1,13 @@
+{
+  "title": "SourceLens RAG Operations",
+  "uid": "sourcelens-rag",
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "panels": [
+    {"type":"timeseries","title":"RAG stage p95 latency","gridPos":{"x":0,"y":0,"w":12,"h":8},"targets":[{"expr":"histogram_quantile(0.95, sum by (le, stage) (rate(rag_stage_duration_seconds_bucket[5m])))","legendFormat":"{{stage}}"}]},
+    {"type":"timeseries","title":"Answer quality","gridPos":{"x":12,"y":0,"w":12,"h":8},"targets":[{"expr":"sum by (metric) (rate(rag_answer_quality_ratio_sum[15m])) / sum by (metric) (rate(rag_answer_quality_ratio_count[15m]))","legendFormat":"{{metric}}"}]},
+    {"type":"timeseries","title":"Index job outcomes","gridPos":{"x":0,"y":8,"w":8,"h":8},"targets":[{"expr":"sum by (status) (increase(rag_index_jobs_total[1h]))","legendFormat":"{{status}}"}]},
+    {"type":"timeseries","title":"Cache efficiency","gridPos":{"x":8,"y":8,"w":8,"h":8},"targets":[{"expr":"sum by (cache, result) (rate(rag_cache_events_total[5m]))","legendFormat":"{{cache}} {{result}}"}]},
+    {"type":"timeseries","title":"Retrieved chunks","gridPos":{"x":16,"y":8,"w":8,"h":8},"targets":[{"expr":"histogram_quantile(0.95, sum by (le) (rate(rag_retrieval_results_bucket[5m])))","legendFormat":"p95"}]}
+  ]
+}

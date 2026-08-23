@@ -8,9 +8,9 @@ from typing import Protocol
 import chromadb
 from chromadb.config import Settings as ChromaSettings
 from langchain_chroma import Chroma
-from langchain_community.retrievers import BM25Retriever
 from langchain_core.documents import Document
 from langchain_ollama import OllamaEmbeddings
+from rank_bm25 import BM25Okapi
 
 from app.config import Settings
 from app.embedding_cache import CachedEmbeddings
@@ -28,6 +28,34 @@ STOP_TERMS = {
     "from", "how", "in", "into", "is", "it", "of", "on", "or", "the", "to",
     "what", "when", "where", "which", "with",
 }
+
+
+class LocalBM25Retriever:
+    """Small supported BM25 adapter that avoids the deprecated community retriever."""
+
+    def __init__(self, documents: list[Document]):
+        self.documents = documents
+        self.k = 4
+        self._tokens = [self._tokenize(document.page_content) for document in documents]
+        self._index = BM25Okapi(self._tokens)
+
+    @staticmethod
+    def _tokenize(text: str) -> list[str]:
+        return [token.lower() for token in TOKEN_PATTERN.findall(text)]
+
+    @classmethod
+    def from_documents(cls, documents: list[Document]):
+        return cls(documents)
+
+    def invoke(self, query: str) -> list[Document]:
+        scores = self._index.get_scores(self._tokenize(query))
+        ranked = sorted(zip(scores, self.documents), key=lambda item: item[0], reverse=True)
+        results = []
+        for rank, (score, document) in enumerate(ranked[:self.k], start=1):
+            document.metadata["sparse_rank"] = rank
+            document.metadata["sparse_score"] = float(score)
+            results.append(document)
+        return results
 
 
 def _search_terms(value: str) -> set[str]:
@@ -156,7 +184,7 @@ class RepositoryIndex:
         self._reranker_lock = threading.Lock()
         self._cache_lock = threading.RLock()
         self._document_cache: dict[tuple, list[Document]] = {}
-        self._bm25_cache: dict[tuple, BM25Retriever] = {}
+        self._bm25_cache: dict[tuple, LocalBM25Retriever] = {}
         self._parent_cache: dict[tuple, dict[str, list[Document]]] = {}
         self._rerank_cache: dict[tuple, float] = {}
 
@@ -303,7 +331,7 @@ class RepositoryIndex:
         return documents
 
     def _bm25(self, repository: str, branch: str | None, where: dict,
-              documents: list[Document]) -> BM25Retriever | None:
+              documents: list[Document]) -> LocalBM25Retriever | None:
         if not documents:
             return None
         key = (self._cache_version(repository), repository, branch, repr(where))
@@ -311,7 +339,7 @@ class RepositoryIndex:
             retriever = self._bm25_cache.get(key)
             if retriever is None:
                 CACHE_EVENTS.labels("bm25", "miss").inc()
-                retriever = BM25Retriever.from_documents(documents)
+                retriever = LocalBM25Retriever.from_documents(documents)
                 self._bm25_cache[key] = retriever
             else:
                 CACHE_EVENTS.labels("bm25", "hit").inc()
@@ -327,6 +355,8 @@ class RepositoryIndex:
                 identifier = str(document.metadata.get("chunk_id"))
                 documents[identifier] = document
                 scores[identifier] = scores.get(identifier, 0.0) + weight / (constant + rank)
+        for identifier, score in scores.items():
+            documents[identifier].metadata["fusion_score"] = score
         return [documents[key] for key in sorted(scores, key=scores.get, reverse=True)]
 
     def _rerank(self, query: str, repository: str, documents: list[Document], k: int) -> list[Document]:
@@ -380,7 +410,11 @@ class RepositoryIndex:
                 source_prior -= 0.2
             if path.endswith((".lock", "-lock.yaml", "lock.json")):
                 source_prior -= 1.0
-            return float(score or 0.0) + exact_symbol + path_match + identifier_match + source_prior
+            adjusted_score = (float(score or 0.0) + exact_symbol + path_match
+                              + identifier_match + source_prior)
+            metadata["reranker_score"] = float(score or 0.0)
+            metadata["final_score"] = adjusted_score
+            return adjusted_score
 
         ranked = [document for _, document in sorted(
             zip(scores, candidates), key=adjusted, reverse=True
@@ -439,6 +473,10 @@ class RepositoryIndex:
                     current_files[rel_path] = {
                         "digest": digest,
                         "chunk_ids": [doc.metadata["chunk_id"] for doc in file_docs],
+                        "parsers": sorted({str(doc.metadata.get("parser", "local"))
+                                           for doc in file_docs}),
+                        "chunk_types": sorted({str(doc.metadata.get("symbol_type", "text_chunk"))
+                                               for doc in file_docs}),
                     }
                 remaining -= 1
                 if remaining <= 0:
@@ -497,6 +535,8 @@ class RepositoryIndex:
         if tool not in {"symbol_search", "dependency_search"}:
             with stage_timer("dense_retrieval"):
                 dense = store.similarity_search(query, k=candidate_k, filter=where)
+            for rank, document in enumerate(dense, start=1):
+                document.metadata["dense_rank"] = rank
 
         candidates = self._documents_for_where(repository, branch, where, store)
         sparse: list[Document] = []
@@ -517,6 +557,8 @@ class RepositoryIndex:
             ),
             reverse=True,
         )[:candidate_k]
+        for rank, document in enumerate(lexical, start=1):
+            document.metadata["lexical_rank"] = rank
 
         if tool == "symbol_search":
             sparse = sorted(
@@ -534,7 +576,7 @@ class RepositoryIndex:
                                if any(term in doc.page_content.lower()
                                       for term in dependency_terms)]
             if dependency_docs:
-                bm25 = BM25Retriever.from_documents(dependency_docs)
+                bm25 = LocalBM25Retriever.from_documents(dependency_docs)
                 bm25.k = candidate_k
                 sparse = bm25.invoke(query)
 

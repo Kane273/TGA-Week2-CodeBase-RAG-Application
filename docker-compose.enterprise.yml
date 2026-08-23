@@ -18,6 +18,8 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: replace-before-shared-use
     volumes:
       - ./infra/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      - ./infra/grafana-dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
+      - ./infra/grafana-dashboard.json:/var/lib/grafana/dashboards/sourcelens.json:ro
       - grafana_data:/var/lib/grafana
     ports: ["3000:3000"]
   loki:

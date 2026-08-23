@@ -19,6 +19,13 @@ RETRIEVAL_RESULTS = Histogram(
 ACTIVE_MODEL_REQUESTS = Gauge(
     "rag_active_model_requests", "Model requests currently executing"
 )
+ANSWER_QUALITY = Histogram(
+    "rag_answer_quality_ratio", "Answer quality score from zero to one", ["metric"],
+    buckets=(0.25, 0.4, 0.5, 0.7, 0.8, 0.9, 0.95, 1.0),
+)
+INDEX_JOBS = Counter(
+    "rag_index_jobs_total", "Completed indexing job outcomes", ["kind", "status"]
+)
 
 
 @contextmanager

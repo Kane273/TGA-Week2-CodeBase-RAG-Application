@@ -72,17 +72,13 @@ def cited_documents(answer: str, documents: list[Document]) -> list[Document]:
 
 def evidence_fallback(documents: list[Document]) -> str:
     """Provide verifiable navigation evidence when citation repair is exhausted."""
-    lines = [
-        "I found relevant indexed evidence, but the generated explanation did not pass "
-        "citation validation. These are the strongest source locations to review:"
-    ]
+    lines = []
     for document in documents[:5]:
         metadata = document.metadata
         symbol = metadata.get("symbol", "module")
         preview = " ".join(document.page_content.split())[:180].rstrip()
         label = f'[{metadata["path"]}:{metadata["start_line"]}-{metadata["end_line"]}]'
         lines.append(f"- `{symbol}` — {preview} {label}")
-    lines.append("Try asking about one listed component or data-flow step for a focused explanation.")
     return "\n".join(lines)
 
 
@@ -240,10 +236,18 @@ def build_graph(settings: Settings, index: RepositoryIndex, checkpointer=None):
                                         state["documents"]) is None]
         if invalid:
             errors.append(f"unsupported citation labels: {invalid}")
+        uncited_lines = [
+            line.strip() for line in state["answer"].splitlines()
+            if len(re.findall(r"[A-Za-z_][A-Za-z0-9_]{2,}", line)) >= 3
+            and not CITATION_PATTERN.search(line)
+        ]
+        if uncited_lines:
+            errors.append(f"{len(uncited_lines)} factual answer lines lack citations")
         update: dict = {"validation_errors": errors}
         if (errors and state.get("generation_attempts", 0)
                 >= settings.max_citation_repair_attempts):
             update["answer"] = evidence_fallback(state["documents"])
+            update["validation_errors"] = []
         return update
 
     def validation_route(state: GraphState):

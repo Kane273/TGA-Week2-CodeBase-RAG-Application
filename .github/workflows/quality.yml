@@ -16,3 +16,24 @@ jobs:
       - run: uv run pytest -q
       - run: uv run python -m compileall -q app tests scripts
       - run: docker compose config --quiet
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 &
+      - run: |
+          for attempt in {1..30}; do
+            curl -fsS http://127.0.0.1:8000/ && exit 0
+            sleep 1
+          done
+          exit 1
+      - run: npm run test:e2e -- --project=chromium

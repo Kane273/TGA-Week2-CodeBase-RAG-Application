@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#090b10">
   <title>SourceLens · Codebase Intelligence</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20260822-8">
+  <link rel="stylesheet" href="/static/styles.css?v=20260822-16">
 </head>
 <body>
   <aside class="sidebar">
@@ -25,16 +25,17 @@
           <button id="deleteChatButton" class="icon-button" type="button" aria-label="Delete conversation">×</button>
         </div>
         <div class="conversation-actions"><button id="favoriteChatButton" type="button" aria-label="Favorite conversation">☆</button><button id="renameChatButton" type="button">Rename</button><button id="folderChatButton" type="button">Move</button><button id="tagChatButton" type="button">Tag</button><button id="exportChatButton" type="button">Export</button></div>
-        <div id="activeChatTags" class="chat-tags" aria-label="Conversation tags"></div>
+        <div id="activeChatTags" class="chat-tags" role="list" aria-label="Conversation tags"></div>
       </section>
-      <section class="panel-section">
-        <div class="section-heading"><span>Knowledge source</span><span class="step">01</span></div>
+      <section id="repositorySection" class="panel-section ingestion-section">
+        <div class="section-heading"><span>Repository or GitHub indexing</span><span><span class="step">01</span><button id="toggleRepositorySection" class="section-toggle" type="button" aria-expanded="true" aria-controls="repositorySection">⌃</button></span></div>
         <label for="workspaceSelect">Active workspace</label>
         <div class="select-row">
           <select id="workspaceSelect" aria-label="Active knowledge workspace"><option value="">No indexed workspace</option></select>
           <button id="removeWorkspaceButton" class="icon-button" type="button" aria-label="Remove temporary workspace">×</button>
         </div>
         <div id="workspaceMeta" class="workspace-meta">Select or index a knowledge source</div>
+        <div id="workspaceBadges" class="workspace-badges" aria-label="Workspace status"></div>
         <label for="repoPath">Local path or public GitHub URL</label>
         <div class="input-shell">
           <svg viewBox="0 0 24 24"><path d="M3 7h6l2 2h10v10H3z"/></svg>
@@ -52,20 +53,21 @@
         <div id="indexStatus" class="status-line"><i></i><span>Ready to index</span></div>
         <div class="progress-track" aria-hidden="true"><span id="indexProgress"></span></div>
         <button id="retryIndexButton" class="recovery-button" type="button" hidden>Retry indexing</button>
+        <details id="workspaceStorage" class="file-panel source-details-panel" hidden></details>
       </section>
 
-      <section class="panel-section">
-        <div class="section-heading"><span>Add documents</span><span class="step">02</span></div>
-        <label id="dropZone" class="drop-zone" for="fileUpload">
-          <input id="fileUpload" type="file" multiple accept=".py,.js,.jsx,.ts,.tsx,.java,.go,.rs,.rb,.php,.cs,.c,.cpp,.h,.hpp,.sql,.sh,.yaml,.yml,.json,.toml,.md,.rst,.txt,.graphql,.proto,.pdf,.docx">
-          <input id="folderUpload" type="file" webkitdirectory multiple>
+      <section id="uploadSection" class="panel-section ingestion-section">
+        <div class="section-heading"><span>File or folder upload</span><span><span class="step">02</span><button id="toggleUploadSection" class="section-toggle" type="button" aria-expanded="true" aria-controls="uploadSection">⌃</button></span></div>
+        <div id="dropZone" class="drop-zone" role="button" tabindex="0" aria-label="Choose files or a folder to upload">
           <span class="upload-icon">
             <svg viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M5 15v5h14v-5"/></svg>
           </span>
           <strong>Drop files here</strong>
-          <small>or click to browse · 20 MB max</small>
+          <small>or click to choose files or a folder · 20 MB max</small>
           <span id="fileCount" class="file-count">PDF, DOCX, code and text</span>
-        </label>
+        </div>
+        <input id="fileUpload" type="file" multiple hidden accept=".py,.js,.jsx,.ts,.tsx,.java,.go,.rs,.rb,.php,.cs,.c,.cpp,.h,.hpp,.sql,.sh,.yaml,.yml,.json,.toml,.md,.rst,.txt,.graphql,.proto,.pdf,.docx">
+        <input id="folderUpload" type="file" webkitdirectory directory multiple hidden aria-label="Choose a code folder">
         <div class="upload-actions">
           <button id="folderButton" class="folder-button" type="button">
             <svg viewBox="0 0 24 24"><path d="M3 7h6l2 2h10v10H3z"/></svg><span>Choose folder</span>
@@ -77,7 +79,15 @@
         <p id="uploadStatus" class="helper-text">Files stay private and are processed locally.</p>
         <div id="uploadReview" class="upload-review" hidden></div>
         <div class="progress-track" aria-hidden="true"><span id="uploadProgress"></span></div>
-        <details id="uploadedFilesPanel" class="file-panel"><summary>Uploaded files <span id="uploadedFileTotal">0</span></summary><ul id="uploadedFiles"></ul></details>
+        <details id="uploadedFilesPanel" class="file-panel">
+          <summary>Uploaded files <span id="uploadedFileTotal">0 · 0 chunks</span></summary>
+          <div class="file-panel-tools">
+            <input id="uploadedFileSearch" type="search" placeholder="Filter uploaded files" aria-label="Filter uploaded files">
+            <select id="uploadedParserFilter" aria-label="Filter uploaded files by parser"><option value="">All parsing methods</option></select>
+          </div>
+          <p id="uploadedFilesEmpty" class="empty-state">No files uploaded yet.</p>
+          <ul id="uploadedFiles"></ul>
+        </details>
       </section>
     </div>
 
@@ -97,9 +107,14 @@
         <div id="activeContext" class="active-context">No workspace selected</div>
       </div>
       <div class="topbar-actions">
+        <button id="homeButton" class="topbar-button home-button" type="button" aria-label="Return to home">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 11 8-7 8 7v9h-6v-6h-4v6H4z"/></svg>
+          <span>Home</span>
+        </button>
         <button id="explorerButton" class="topbar-button" type="button">Files</button>
         <button id="templatesButton" class="topbar-button" type="button">Templates</button>
         <button id="analyticsButton" class="topbar-button" type="button">Insights</button>
+        <button id="jobsButton" class="topbar-button" type="button">Jobs</button>
         <button id="reportButton" class="topbar-button" type="button">Report</button>
         <button id="commandButton" class="topbar-button" type="button" aria-label="Open command palette">⌘K</button>
         <button id="newTopicButton" class="topbar-button" type="button">New topic</button>
@@ -165,6 +180,20 @@
       <div class="dialog-actions"><button id="actionDialogCancel" value="cancel">Cancel</button><button id="actionDialogConfirm" class="primary-button" value="confirm">Confirm</button></div>
     </form>
   </dialog>
+  <dialog id="uploadPickerDialog" class="action-dialog upload-picker-dialog" aria-labelledby="uploadPickerTitle">
+    <button id="cancelUploadPicker" class="upload-picker-close" type="button" aria-label="Close upload options">×</button>
+    <h2 id="uploadPickerTitle">What would you like to add?</h2>
+    <div class="upload-picker-options">
+      <button id="chooseFilesButton" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h8l4 4v14H6zM14 3v5h5"/></svg>
+        <span><strong>Choose files</strong><small>Select one or more documents</small></span>
+      </button>
+      <button id="chooseFolderButton" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h6l2 2h10v10H3z"/></svg>
+        <span><strong>Choose folder</strong><small>Select an entire codebase</small></span>
+      </button>
+    </div>
+  </dialog>
   <dialog id="explorerDialog" class="feature-dialog wide-dialog" aria-labelledby="explorerTitle">
     <header><div><span class="welcome-label">Repository explorer</span><h2 id="explorerTitle">Indexed files</h2></div><button class="dialog-x" data-close="explorerDialog" aria-label="Close repository explorer">×</button></header>
     <input id="fileSearch" class="feature-search" type="search" placeholder="Filter paths…" aria-label="Filter repository files">
@@ -184,6 +213,11 @@
     <header><div><span class="welcome-label">Workspace health</span><h2 id="analyticsTitle">Knowledge insights</h2></div><button class="dialog-x" data-close="analyticsDialog" aria-label="Close workspace insights">×</button></header>
     <div id="analyticsContent"></div>
   </dialog>
+  <dialog id="jobsDialog" class="feature-dialog" aria-labelledby="jobsTitle">
+    <header><div><span class="welcome-label">Ingestion operations</span><h2 id="jobsTitle">Indexing job history</h2></div><button class="dialog-x" data-close="jobsDialog" aria-label="Close indexing jobs">×</button></header>
+    <div id="jobsContent" class="jobs-content" aria-live="polite"></div>
+    <footer><button id="refreshJobsButton" type="button">Refresh jobs</button></footer>
+  </dialog>
   <dialog id="reportDialog" class="feature-dialog wide-dialog report-dialog" aria-labelledby="reportTitle">
     <header><div><span class="welcome-label">Source-backed analysis</span><h2 id="reportTitle">Conversation report</h2></div><button class="dialog-x" data-close="reportDialog" aria-label="Close report">×</button></header>
     <div id="reportContent"></div><footer><button id="printReportButton" type="button">Print / Save PDF</button><button id="downloadReportButton" type="button">Download JSON</button></footer>
@@ -197,6 +231,6 @@
     <button id="askChangesButton" type="button" hidden>Ask about these changes</button><button id="downloadSummaryButton" type="button">Download details</button>
   </section>
   <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
-  <script src="/static/app.js?v=20260822-16"></script>
+  <script src="/static/app.js?v=20260822-33"></script>
 </body>
 </html>

@@ -1,4 +1,5 @@
 import json
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -41,6 +42,23 @@ def _terms(text: str) -> set[str]:
 
 def _bounded(value: float) -> float:
     return round(max(0.0, min(1.0, float(value))), 4)
+
+
+def semantic_answer_relevance(question: str, answer: str, embeddings,
+                              fallback: float = 0.0) -> float:
+    """Score paraphrased answers locally, falling back to auditable lexical overlap."""
+    if not question.strip() or not answer.strip():
+        return _bounded(fallback)
+    try:
+        question_vector, answer_vector = embeddings.embed_documents([question, answer])
+        denominator = math.sqrt(sum(value * value for value in question_vector)) * math.sqrt(
+            sum(value * value for value in answer_vector)
+        )
+        cosine = (sum(left * right for left, right in zip(question_vector, answer_vector))
+                  / denominator if denominator else 0.0)
+        return _bounded(max(fallback, cosine))
+    except Exception:
+        return _bounded(fallback)
 
 
 def build_local_answer_judge(settings):

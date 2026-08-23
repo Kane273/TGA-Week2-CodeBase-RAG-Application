@@ -11,6 +11,7 @@ from app.database import IndexJob, IndexVersion, RepositoryRecord, audit, sessio
 from app.evaluation import validate_staging_collection
 from app.ingestion import detect_branch, safe_repository_path
 from app.observability import span
+from app.performance import INDEX_JOBS
 from app.http_controls import INDEX_QUEUE_DEPTH
 from app.retrieval import RepositoryIndex
 
@@ -110,12 +111,14 @@ class IndexJobManager:
                         self.index.set_active_collection(repository_name, collection)
                         self._update(job_id, "complete", 100,
                                      f"Activated index v{version}: {result.chunks} chunks")
+                        INDEX_JOBS.labels("repository", "complete").inc()
                         audit(job.created_by, "index.activated", repository_id,
                               f"version={version};collection={collection}")
                         return
                 except Exception as exc:
                     if attempt >= self.settings.max_index_retries:
                         self._update(job_id, "failed", 100, str(exc))
+                        INDEX_JOBS.labels("repository", "failed").inc()
                         audit("system", "index.failed", detail=f"job={job_id};error={exc}")
                     else:
                         self._update(job_id, "retrying", 0,

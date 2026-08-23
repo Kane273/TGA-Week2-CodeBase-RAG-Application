@@ -18,5 +18,6 @@ if command -v redis-cli >/dev/null 2>&1; then
 fi
 
 tar -czf "$destination/rag-data.tar.gz" "${RAG_DATA_DIR:-.rag_data}"
-find "$destination" -type f -exec shasum -a 256 {} \; > "$destination/SHA256SUMS"
+cp evaluations/gates.json "$destination/benchmark-gates.json"
+find "$destination" -type f ! -name SHA256SUMS -exec shasum -a 256 {} \; > "$destination/SHA256SUMS"
 echo "Backup created at $destination"

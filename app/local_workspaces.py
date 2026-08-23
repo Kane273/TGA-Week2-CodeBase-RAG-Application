@@ -57,6 +57,19 @@ class TemporaryWorkspaceStore:
         status = changes.pop("status", state.get("status", "ready"))
         return self.save(workspace_id, state["repository"], files, status, **changes)
 
+    def extend(self, workspace_id: str, hours: int) -> dict:
+        state = self.get(workspace_id, include_expired=True)
+        if state is None:
+            raise KeyError(workspace_id)
+        state["expires_at"] = (datetime.now(UTC) + timedelta(hours=hours)).isoformat()
+        state["updated_at"] = datetime.now(UTC).isoformat()
+        path = self._path(workspace_id)
+        temporary = path.with_suffix(".json.tmp")
+        with self._lock:
+            temporary.write_text(json.dumps(state))
+            temporary.replace(path)
+        return state
+
     def active(self) -> list[dict]:
         workspaces = []
         for path in self.directory.glob("*.json"):
@@ -65,16 +78,20 @@ class TemporaryWorkspaceStore:
                 workspaces.append(state)
         return sorted(workspaces, key=lambda item: item["updated_at"], reverse=True)
 
-    def purge_expired(self) -> list[dict]:
-        expired: list[dict] = []
+    def expired(self) -> list[dict]:
+        """Return expired workspace records without deleting cleanup metadata."""
         now = datetime.now(UTC)
+        expired: list[dict] = []
         for path in self.directory.glob("*.json"):
             state = self.get(path.stem, include_expired=True)
-            if not state:
-                continue
-            if datetime.fromisoformat(state["expires_at"]) <= now:
+            if state and datetime.fromisoformat(state["expires_at"]) <= now:
                 expired.append(state)
-                path.unlink(missing_ok=True)
+        return expired
+
+    def purge_expired(self) -> list[dict]:
+        expired = self.expired()
+        for state in expired:
+            self._path(state["id"]).unlink(missing_ok=True)
         return expired
 
     def delete(self, workspace_id: str) -> dict | None:

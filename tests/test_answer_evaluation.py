@@ -2,7 +2,8 @@ import pytest
 from langchain_core.documents import Document
 
 from app.evaluation import (aggregate_answer_evaluations, deterministic_answer_metrics,
-                            evaluate_answer, parse_judge_scores)
+                            evaluate_answer, parse_judge_scores,
+                            semantic_answer_relevance)
 
 
 def source(path: str, text: str, start: int = 1, end: int = 20) -> Document:
@@ -73,3 +74,22 @@ def test_quality_gate_reports_metric_failures():
     assert result["failures"] == {
         "faithfulness": {"score": 0.6, "threshold": 0.8}
     }
+
+
+def test_semantic_relevance_recognizes_paraphrases_without_keyword_overlap():
+    class Embeddings:
+        def embed_documents(self, texts):
+            assert texts == ["How is access controlled?", "JWT claims authorize each request."]
+            return [[1.0, 0.0], [0.8, 0.6]]
+
+    assert semantic_answer_relevance(
+        "How is access controlled?", "JWT claims authorize each request.", Embeddings()
+    ) == 0.8
+
+
+def test_semantic_relevance_falls_back_when_local_embeddings_are_unavailable():
+    class BrokenEmbeddings:
+        def embed_documents(self, texts):
+            raise RuntimeError("offline")
+
+    assert semantic_answer_relevance("question", "answer", BrokenEmbeddings(), 0.35) == 0.35

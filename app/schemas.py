@@ -64,11 +64,22 @@ class RollbackRequest(BaseModel):
     version: int = Field(..., ge=1)
 
 
+class WorkspaceRetentionRequest(BaseModel):
+    hours: int = Field(..., ge=1, le=720)
+
+
 class Citation(BaseModel):
     path: str
     start_line: int
     end_line: int
     branch: str
+    dense_rank: int | None = None
+    sparse_rank: int | None = None
+    lexical_rank: int | None = None
+    sparse_score: float | None = None
+    fusion_score: float | None = None
+    reranker_score: float | None = None
+    final_score: float | None = None
 
 
 class ChatResponse(BaseModel):

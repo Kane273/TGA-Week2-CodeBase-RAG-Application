@@ -97,4 +97,4 @@ def test_interactive_feature_controls_have_accessible_names():
     assert 'aria-label="Search commands"' in html
     close_targets = set(re.findall(r'data-close="([^"]+)"', html))
     assert close_targets == {"explorerDialog", "compareDialog", "templatesDialog",
-                             "analyticsDialog", "reportDialog"}
+                             "analyticsDialog", "jobsDialog", "reportDialog"}

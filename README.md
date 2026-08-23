@@ -176,6 +176,31 @@ The evaluation function is instrumented as a LangSmith run, but hosted tracing i
 uv run pytest
 ```
 
+Browser journeys and automated accessibility checks use Playwright and Axe:
+
+```bash
+npm install
+npx playwright install chromium
+npm run test:e2e
+```
+
+Load and latency gates are defined in `tests/load/k6.js`. Run them against a started local
+application with `k6 run tests/load/k6.js`. The provisioned Grafana dashboard reports stage
+latency, answer quality, index outcomes, cache behavior, and retrieval volume.
+
+The UI exposes persistent indexing-job history, uploaded-workspace storage usage, expiry
+extension, reindexing, and per-answer dense/sparse/fusion/reranker diagnostics. Temporary
+uploads reject identical file content, expire automatically, and can be explicitly deleted.
+
+Version-controlled benchmark thresholds are in `evaluations/gates.json`. A saved benchmark
+result can be checked in CI or locally with:
+
+```bash
+uv run python scripts/check-benchmark-gates.py benchmark-result.json
+```
+
+Verify a backup without restoring it using `./scripts/verify-backup.sh <backup-directory>`.
+
 ## Current production boundaries
 
 The default `./scripts/run-dev.sh` path remains deliberately simple, local, persistent, and free of API keys. The hardened profile adds:
