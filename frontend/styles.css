@@ -38,12 +38,17 @@ svg { width: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-l
 select { width: 100%; min-width: 0; border: 1px solid var(--line); border-radius: 8px; padding: 8px; color: var(--text); background: var(--surface); font-size: 10px; }
 .icon-button, .icon-text-button, .topbar-button, .recovery-button { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--muted); }
 .icon-button { font-size: 17px; }
+.workspace-remove-button { width: 32px; min-width: 32px; color: #f29ca5; border-color: #703b44; }
+.workspace-remove-button:hover:not(:disabled) { color: #ffd3d8; border-color: #a64d5c; background: rgba(79,28,36,.35); }
+.workspace-remove-button:disabled { display: inline-grid; opacity: .42; cursor: not-allowed; }
 .icon-text-button { border: 0; padding: 3px 6px; font-size: 9px; }
 .workspace-meta { color: var(--subtle); font-size: 9px; line-height: 1.4; }
 .source-details-panel { margin-top: 2px; }
 .progress-track { height: 3px; overflow: hidden; border-radius: 4px; background: var(--line-soft); }
 .progress-track span { display: block; width: 0; height: 100%; background: var(--mint); transition: width .3s ease; }
 .recovery-button { padding: 7px; font-size: 9px; }
+.danger-button { border-color: #703b44; color: #f29ca5; background: rgba(79,28,36,.24); }
+.danger-button:hover { border-color: #a64d5c; color: #ffd3d8; }
 .file-panel { color: var(--muted); font-size: 9px; }
 .file-panel summary { cursor: pointer; }
 .file-panel ul { max-height: 240px; overflow: auto; margin: 8px 0 0; padding: 0; list-style: none; }

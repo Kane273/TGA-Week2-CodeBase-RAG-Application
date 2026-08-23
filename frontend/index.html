@@ -32,7 +32,7 @@
         <label for="workspaceSelect">Active workspace</label>
         <div class="select-row">
           <select id="workspaceSelect" aria-label="Active knowledge workspace"><option value="">No indexed workspace</option></select>
-          <button id="removeWorkspaceButton" class="icon-button" type="button" aria-label="Remove temporary workspace">×</button>
+          <button id="removeWorkspaceButton" class="icon-button workspace-remove-button" type="button" aria-label="Remove active uploaded workspace" title="Remove active uploaded workspace">×</button>
         </div>
         <div id="workspaceMeta" class="workspace-meta">Select or index a knowledge source</div>
         <div id="workspaceBadges" class="workspace-badges" aria-label="Workspace status"></div>
@@ -88,6 +88,7 @@
           <p id="uploadedFilesEmpty" class="empty-state">No files uploaded yet.</p>
           <ul id="uploadedFiles"></ul>
         </details>
+        <button id="clearUploadsButton" class="recovery-button danger-button" type="button" hidden>Clear uploaded workspace</button>
       </section>
     </div>
 
@@ -231,6 +232,6 @@
     <button id="askChangesButton" type="button" hidden>Ask about these changes</button><button id="downloadSummaryButton" type="button">Download details</button>
   </section>
   <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
-  <script src="/static/app.js?v=20260822-33"></script>
+  <script src="/static/app.js?v=20260823-36"></script>
 </body>
 </html>

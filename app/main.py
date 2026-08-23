@@ -550,6 +550,31 @@ def list_local_sources(principal: Principal = Depends(current_principal)):
     return sorted(sources, key=lambda item: (item["repository"], item["branch"]))
 
 
+@app.delete("/api/local-sources/{source_id}", status_code=204)
+def delete_local_source(source_id: str,
+                        principal: Principal = Depends(current_principal)):
+    """Delete a local repository index without deleting its original source files."""
+    if settings.auth_enabled:
+        raise HTTPException(status_code=404, detail="Local source not found")
+    match = None
+    for entry in load_manifest(settings).values():
+        repository, branch = entry.get("repository"), entry.get("branch")
+        if not repository or not branch:
+            continue
+        identifier = hashlib.sha256(f"{repository}:{branch}".encode()).hexdigest()[:16]
+        if identifier == source_id:
+            match = (repository, branch)
+            break
+    if not match:
+        raise HTTPException(status_code=404, detail="Local source not found")
+    repository, branch = match
+    if any(workspace["repository"] == repository and workspace.get("branch") == branch
+           for workspace in upload_workspace_store.active()):
+        raise HTTPException(status_code=409, detail="Use the uploaded workspace delete action")
+    index.delete_repository_documents(repository, branch)
+    remove_manifest_entry(settings, repository, branch)
+
+
 @app.delete("/api/local-workspaces/{workspace_id}", status_code=204)
 def delete_local_workspace(workspace_id: str,
                            principal: Principal = Depends(current_principal)):
